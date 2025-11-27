@@ -1,10 +1,11 @@
 import re
 from typing import List, Tuple, Dict, Set
+from collections import deque
 
 
 class ResolutionEngine:
     """
-    МОДУЛЬ 2: Улучшенный движок резолюций
+    МОДУЛЬ 2: Улучшенный движок резолюций с приоритетом единичных клауз
     """
 
     def __init__(self):
@@ -24,12 +25,19 @@ class ResolutionEngine:
         """
         formula = formula.strip()
 
+        # Обработка импликации без квантора
+        if '→' in formula and not formula.startswith('∀'):
+            left, right = formula.split('→')
+            left = left.strip()
+            right = right.strip()
+            # A → B преобразуется в ¬A ∨ B
+            return self.parse_formula(f"¬{left} ∨ {right}")
+
         # Обработка универсального квантора
         if formula.startswith('∀'):
             match = re.match(r'∀x\s*\((.*)\)', formula)
             if match:
                 body = match.group(1)
-                # ∀x (Человек(x) → Смертен(x)) -> ¬Человек(x) ∨ Смертен(x)
                 if '→' in body:
                     left, right = body.split('→')
                     left = left.strip()
@@ -43,7 +51,6 @@ class ResolutionEngine:
 
         # Базовый случай: одиночный литерал
         return [self._parse_literal(formula)]
-
     def _parse_literal(self, literal: str) -> Tuple[str, List[str], bool]:
         """Парсит отдельный литерал"""
         literal = literal.strip()
@@ -89,6 +96,10 @@ class ResolutionEngine:
             new_clause.append((pred, new_args, neg))
         return new_clause
 
+    def _is_unit_clause(self, clause: List[Tuple]) -> bool:
+        """Проверяет, является ли клауза единичной (содержит только один литерал)"""
+        return len(clause) == 1
+
     def _resolve(self, clause1: List[Tuple], clause2: List[Tuple]) -> List[Tuple]:
         """Пытается применить резолюцию к двум клаузам"""
         for i, (pred1, args1, neg1) in enumerate(clause1):
@@ -132,7 +143,7 @@ class ResolutionEngine:
 
     def prove(self, formulas: List[str]) -> Tuple[bool, List[str]]:
         """
-        Улучшенный алгоритм доказательства методом резолюций
+        Улучшенный алгоритм доказательства методом резолюций с приоритетом единичных клауз
         """
         print("🧮 Модуль 2: Начинаю формальное доказательство...")
         self.steps_log = []
@@ -155,20 +166,39 @@ class ResolutionEngine:
             self._log_step("Нет корректных клауз для доказательства")
             return False, self.steps_log
 
-        # Улучшенный алгоритм резолюции
-        new_clauses = clauses.copy()
-        all_clauses_set = set()  # Для быстрой проверки уникальности
-        clause_strings = [self._clause_to_str(c) for c in clauses]
-        all_clauses_set.update(clause_strings)
+        # Разделяем клаузы на единичные и составные
+        unit_clauses = [c for c in clauses if self._is_unit_clause(c)]
+        non_unit_clauses = [c for c in clauses if not self._is_unit_clause(c)]
+
+        self._log_step(f"Найдено {len(unit_clauses)} единичных и {len(non_unit_clauses)} составных клауз")
+
+        # Создаем очереди с приоритетом для единичных клауз
+        new_unit_queue = deque(unit_clauses)
+        new_non_unit_queue = deque(non_unit_clauses)
+
+        all_clauses = clauses.copy()
+        all_clauses_set = set(self._clause_to_str(c) for c in clauses)
 
         max_steps = 50
         steps = 0
 
-        while new_clauses and steps < max_steps:
+        while (new_unit_queue or new_non_unit_queue) and steps < max_steps:
             steps += 1
-            current = new_clauses.pop(0)
 
-            for existing in clauses:
+            # ПРИОРИТЕТ 1: Сначала берем единичные клаузы
+            if new_unit_queue:
+                current = new_unit_queue.popleft()
+                clauses_to_check = all_clauses  # Проверяем со всеми клаузами
+            elif new_non_unit_queue:
+                current = new_non_unit_queue.popleft()
+                # Для составных клауз проверяем только с единичными (стратегия unit preference)
+                clauses_to_check = [c for c in all_clauses if self._is_unit_clause(c)]
+                if not clauses_to_check:
+                    clauses_to_check = all_clauses
+            else:
+                break
+
+            for existing in clauses_to_check:
                 if current == existing:
                     continue
 
@@ -188,8 +218,35 @@ class ResolutionEngine:
                         self._log_step(
                             f"Резолюция: {self._clause_to_str(current)} и {self._clause_to_str(existing)} -> {resolvent_str}")
                         all_clauses_set.add(resolvent_str)
-                        clauses.append(resolvent)
-                        new_clauses.append(resolvent)
+                        all_clauses.append(resolvent)
+
+                        # Добавляем в соответствующую очередь с приоритетом
+                        if self._is_unit_clause(resolvent):
+                            new_unit_queue.appendleft(resolvent)  # Единичные - в начало
+                            self._log_step(f"→ Новая единичная клауза, добавляется в приоритетную очередь")
+                        else:
+                            new_non_unit_queue.append(resolvent)  # Составные - в конец
 
         self._log_step(f"Достигнут лимит в {max_steps} шагов. Противоречие не найдено.")
+        self._log_step(f"Всего обработано клауз: {len(all_clauses)}")
         return False, self.steps_log
+
+    def _remove_tautologies(self, clauses: List[List[Tuple]]) -> List[List[Tuple]]:
+        """
+        Удаляет тавтологии (клаузы, содержащие A и ¬A)
+        """
+        non_tautologies = []
+        for clause in clauses:
+            is_tautology = False
+            for i, (pred1, args1, neg1) in enumerate(clause):
+                for j, (pred2, args2, neg2) in enumerate(clause):
+                    if i != j and pred1 == pred2 and neg1 != neg2:
+                        # Проверяем унификацию аргументов
+                        if self.unify(args1, args2) is not None:
+                            is_tautology = True
+                            break
+                if is_tautology:
+                    break
+            if not is_tautology:
+                non_tautologies.append(clause)
+        return non_tautologies
