@@ -1,7 +1,6 @@
 import ollama
 from config import EXPLAINER_PROMPT
 
-
 class Explainer:
     """
     МОДУЛЬ 3: LLM-объяснятор
@@ -10,26 +9,7 @@ class Explainer:
 
     def __init__(self, model: str = "qwen2.5:7b"):
         self.model = model
-        self.system_prompt = self._create_enhanced_system_prompt()
-
-    def _create_enhanced_system_prompt(self):
-        """Создает улучшенный системный промт для качественных объяснений"""
-        return """Ты - опытный преподаватель логики, который объясняет формальные доказательства на простом и понятном русском языке.
-
-ТВОЯ ЗАДАЧА:
-- Объяснять доказательства КАК НАСТОЯЩИЙ УЧИТЕЛЬ
-- Использовать простой, ясный русский язык
-- Показывать логическую цепочку рассуждений
-- Объяснять, в чем именно состоит противоречие
-- Делать акцент на понимание, а не на формальности
-
-ФОРМАТ ОБЪЯСНЕНИЯ:
-1. Кратко представь, что доказывалось
-2. Покажи ключевые логические шаги
-3. Объясни, где и почему возникло противоречие
-4. Сделай четкий вывод
-
-Избегай шаблонных фраз! Объясняй живо и понятно."""
+        self.system_prompt = EXPLAINER_PROMPT
 
     def explain_proof(self, logical_steps: list, original_query: str, proof_success: bool) -> str:
         """
